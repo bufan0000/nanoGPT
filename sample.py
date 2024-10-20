@@ -5,6 +5,7 @@ import os
 import pickle
 from contextlib import nullcontext
 import torch
+import time
 import tiktoken
 from model import GPTConfig, GPT
 
@@ -12,8 +13,8 @@ from model import GPTConfig, GPT
 init_from = 'resume' # either 'resume' (from an out_dir) or a gpt2 variant (e.g. 'gpt2-xl')
 out_dir = 'out' # ignored if init_from is not 'resume'
 start = "\n" # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
-num_samples = 10 # number of samples to draw
-max_new_tokens = 500 # number of tokens generated in each sample
+num_samples = 1 # number of samples to draw
+max_new_tokens = 1024 # number of tokens generated in each sample
 temperature = 0.8 # 1.0 = no change, < 1.0 = less random, > 1.0 = more random, in predictions
 top_k = 200 # retain only the top_k most likely tokens, clamp others to have 0 probability
 seed = 1337
@@ -81,15 +82,14 @@ if start.startswith('FILE:'):
 start_ids = encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
+t0 = time.time()
 # run generation
 with torch.no_grad():
     with ctx:
         for k in range(num_samples):
-            if enable_kv_cache == True:
-                print("KV Cache Enabled")
-                y = model.generate_with_kv_cache(x, max_new_tokens, temperature=temperature, top_k=top_k) 
-            else:
-                y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k, use_kv_cache=enable_kv_cache)
             print(decode(y[0].tolist()))
             print('---------------')
-
+t1 = time.time()
+dt = t1 - t0
+print(f"Total time = {dt*1000:.2f}ms")

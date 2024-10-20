@@ -63,8 +63,8 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, HS).transpose(1, 2) # (B, nh, T, hs)
 
         if cache_offset >=0:
-           # self.k_cache = self.k_cache.to(q)
-           # self.v_cache = self.v_cache.to(q)
+            self.k_cache = self.k_cache.to(q)
+            self.v_cache = self.v_cache.to(q)
 
             TP = cache_offset + T
             # Both k_cache and v_cache have size [B, nh, T', hs], which T' is extended length including cache. 
@@ -321,7 +321,7 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, num_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, num_new_tokens, temperature=1.0, top_k=None, use_kv_cache = True):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -330,48 +330,21 @@ class GPT(nn.Module):
         max_new_tokens = self.config.block_size - idx.size(1) + 1
 
         if num_new_tokens > max_new_tokens:
-            print(f"Warning: reduced number of tokens to generate from {num_new_tokens} to {max_new_tokens}")
+            # print(f"Warning: reduced number of tokens to generate from {num_new_tokens} to {max_new_tokens}")
             num_new_tokens = max_new_tokens
 
-        for _ in range(num_new_tokens):
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
-
-        return idx
-    
-
-    @torch.no_grad()
-    def generate_with_kv_cache(self, idx, num_new_tokens, temperature=1.0, top_k=None):
-        """
-        Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-        the sequence max_new_tokens times, feeding the predictions back into the model each time.
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
-        max_new_tokens = self.config.block_size - idx.size(1) + 1
-
-        if num_new_tokens > max_new_tokens:
-            print(f"Warning: reduced number of tokens to generate from {num_new_tokens} to {max_new_tokens}")
-            num_new_tokens = max_new_tokens
-
-        cache_offset = 0
+        if use_kv_cache:
+            cache_offset = 0
         for _ in range(num_new_tokens):
 
-            cur_idx = idx[:, cache_offset:]
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(cur_idx, cache_offset=cache_offset)
-            cache_offset = idx.size(1)
+            if use_kv_cache:
+                cur_idx = idx[:, cache_offset:]
+                # forward the model to get the logits for the index in the sequence using existing KV cache.
+                logits, _ = self(cur_idx, cache_offset=cache_offset)
+                cache_offset = idx.size(1)
+            else:
+                # forward the model to get the logits for the index in the sequence without using KV cache.
+                logits, _ = self(idx)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # optionally crop the logits to only the top k options
