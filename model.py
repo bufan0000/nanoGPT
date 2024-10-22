@@ -50,7 +50,6 @@ class CausalSelfAttention(nn.Module):
 
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
-        # self.flash = False
         
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
@@ -82,11 +81,9 @@ class CausalSelfAttention(nn.Module):
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T') -> (B, nh, T, T')
         if self.flash:
-            # print("Use Flash attention.")
             # efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=self.bias[:,:,TP-T:TP,:TP], dropout_p=self.dropout if self.training else 0)
         else:
-            # print("Use self-implemented attention.")
             # att has size [B, nh, T, T']
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,TP-T:TP,:TP] == 0, float('-inf'))
